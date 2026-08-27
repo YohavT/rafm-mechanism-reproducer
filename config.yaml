@@ -1,0 +1,19 @@
+llm_api_versions:
+  gpt-5: '2024-12-01-preview'
+  gpt-4.1: '2025-01-01-preview'
+  text-embedding-3-large: '2024-12-01-preview'
+  gpt-5.1: '2025-01-01-preview'
+  gpt-5.2: 'gpt-5.2-deployment'
+  gpt-5.4-deployment: '2024-12-01-preview'
+  GPT-5.5: '2024-12-01-preview'
+  claude-opus-4-5: ~
+  claude-sonnet-4-6: ~
+
+endpoints:
+  tel_aviv: "https://apim-aiservices-prod-01.azure-api.net"
+
+api_keys:
+  tel_aviv: "e48dccc126da4fe98d107ddbf2472550"
+
+llm_deployment: gpt-5.4-deployment
+llm_deployment_premium: GPT-5.5

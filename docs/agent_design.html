@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Agent design — Mechanism-to-Excel reproducer (POC)</title>
+<style>
+  body { font-family: -apple-system, sans-serif; padding: 24px; background: #fafafa;
+         color: #222; max-width: 1180px; margin: 0 auto; line-height: 1.55; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  .sub { color: #666; font-size: 13px; margin-bottom: 22px; }
+  h2 { font-size: 15px; color: #2F5597; margin-top: 30px; border-bottom: 1px solid #ddd;
+       padding-bottom: 5px; }
+  h3 { font-size: 13px; color: #1f4e79; margin-top: 20px; margin-bottom: 6px; }
+  code, pre { font-family: 'SF Mono', Consolas, monospace; font-size: 11.5px;
+              background: #f1f3f5; padding: 1px 5px; border-radius: 3px; }
+  pre { padding: 12px 14px; line-height: 1.5; overflow-x: auto;
+        border-left: 3px solid #2F5597; background: white; border-radius: 4px; }
+  .box { background: white; border: 1px solid #ccc; border-radius: 5px;
+         padding: 12px 16px; margin: 10px 0; font-size: 13px; }
+  .box.input { border-left: 4px solid #1f6391; background: #eef6f8; }
+  .box.output { border-left: 4px solid #548235; background: #e2efda; }
+  .box.prompt { border-left: 4px solid #b58900; background: #fff8e1; }
+  .box.validation { border-left: 4px solid #c0392b; background: #fdecea; }
+  .box.note { border-left: 4px solid #888; background: #f5f5f5; }
+  .box.checkpoint { border-left: 4px solid #6f42c1; background: #f3eefd; }
+  .box.mechanical { border-left: 4px solid #2c7a7b; background: #e6fffa; }
+  .box-label { font-weight: 700; font-size: 11px; text-transform: uppercase;
+               letter-spacing: 0.5px; margin-bottom: 6px; }
+  .prompt .box-label { color: #b58900; }
+  .input .box-label { color: #1f6391; }
+  .output .box-label { color: #548235; }
+  .validation .box-label { color: #c0392b; }
+  .note .box-label { color: #555; }
+  .checkpoint .box-label { color: #6f42c1; }
+  .mechanical .box-label { color: #2c7a7b; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 18px;
+          font-size: 12px; background: white; }
+  th, td { border: 1px solid #ccc; padding: 7px 10px; vertical-align: top; text-align: left; }
+  th { background: #2F5597; color: white; font-weight: 600; }
+  .step-card { background: white; border: 1px solid #ccc; border-radius: 6px;
+               padding: 14px 18px; margin: 18px 0; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+  .step-card h2 { margin-top: 0; border-bottom: none; padding-bottom: 0;
+                  color: #2F5597; font-size: 14px; }
+  .step-tag { display: inline-block; color: white;
+              padding: 2px 8px; border-radius: 3px; font-size: 10px;
+              letter-spacing: 0.5px; vertical-align: middle; margin-right: 8px; }
+  .tag-llm { background: #b58900; }
+  .tag-mech { background: #2c7a7b; }
+  .tag-human { background: #6f42c1; }
+  svg { display: block; margin: 14px auto; background: white;
+        border: 1px solid #ddd; border-radius: 5px; }
+  ul.compact { margin: 4px 0 4px 18px; padding: 0; }
+  ul.compact li { margin: 3px 0; font-size: 12.5px; }
+  .small { font-size: 11px; color: #777; }
+  .qa-block { background: #f8f9fa; border-left: 3px solid #2F5597;
+              padding: 12px 16px; margin: 10px 0; font-size: 13px; }
+  .qa-block .q { font-weight: 700; color: #2F5597; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Agent design — Mechanism-to-Excel reproducer</h1>
+<div class="sub">
+A POC that takes a parsed actuarial model (hierarchy + formulas) and a user's
+description of a mechanism, and produces a working Excel file reproducing
+that mechanism. Demonstration use case: management fee + BOR for Harel
+old-adif participating. The tool itself is mechanism-agnostic — the user
+specifies which mechanism via a prompt.
+</div>
+
+<h2>1. What this tool does</h2>
+
+<div class="box">
+<b>Mission.</b> Take a complex actuarial model (e.g. RAFM) whose mechanisms
+are implemented in source code, and reproduce one selected mechanism as a
+functional Excel calculation that an actuary can understand and re-derive.
+<br><br>
+<b>Input.</b> A parsed model — a hierarchy of formulas (names and structure)
+plus the verbatim contents of each formula's code. Parsing and
+hierarchisation are assumed already done.
+<br><br>
+<b>Mechanism choice.</b> The user describes the mechanism via a structured
+prompt (4 fields: intro, formula types, models, products). The information
+is intentionally approximate.
+<br><br>
+<b>Demonstration case.</b> Management fee + BOR for old-adif participating
+products in the Harel RAFM model. Proving feasibility on this case is the
+POC goal; the architecture is mechanism-agnostic.
+</div>
+
+<h3>Design philosophy</h3>
+
+<table>
+<thead><tr><th>Principle</th><th>How it is enforced</th></tr></thead>
+<tbody>
+<tr><td><b>No hallucination</b></td><td>Every cited formula number, page, code excerpt must originate from the input. Validators check this after every LLM call.</td></tr>
+<tr><td><b>LLM handles semantics, Python handles rendering</b></td><td>The Excel file is generated by deterministic Python from a validated JSON spec. The LLM never writes openpyxl code.</td></tr>
+<tr><td><b>Verify before stacking</b></td><td>Each stage validates before the next runs. A failed Stage N never reaches Stage N+1.</td></tr>
+<tr><td><b>Human-in-the-loop on critical interpretation</b></td><td>Two explicit checkpoints (after Stage 1 and after Stage 2) where the user confirms or corrects.</td></tr>
+<tr><td><b>Halt rather than guess</b></td><td>When the LLM cannot produce a complete, source-grounded output, it returns a halt signal rather than fabricating.</td></tr>
+</tbody>
+</table>
+
+<h2>2. Technical stack</h2>
+
+<div class="box note">
+<div class="box-label">Stack choice</div>
+<ul class="compact">
+  <li><b>Instructor</b> — forces every LLM call to return a Pydantic-validated structured object, with automatic retry on parsing/validation failure. The single most important library in the stack.</li>
+  <li><b>Native SDK</b> — Anthropic SDK or Azure OpenAI SDK depending on Milliman access (claude-opus-4-5 primary candidate; gpt-5 secondary).</li>
+  <li><b>openpyxl</b> — Excel file generation (deterministic template).</li>
+  <li><b>Pydantic v2</b> — schema definition for every LLM output.</li>
+  <li><b>Python orchestration</b> — plain functions calling stages in order. No heavy framework.</li>
+</ul>
+<p style="margin-top:8px;"><b>Why not LangChain/LangGraph?</b> The pipeline is linear with two checkpoints; it does not need a graph. Plain Python keeps the code auditable (a virtue for an AI-security context) and avoids dependency on a framework with frequent API changes. The architecture is compatible with a future LangGraph port if the tool grows beyond a single linear pipeline.</p>
+</div>
+
+<h2>3. Pipeline overview — 7 stages</h2>
+
+<svg viewBox="0 0 1180 280" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#666"/>
+    </marker>
+  </defs>
+
+  <rect x="20" y="60" width="115" height="80" rx="6" fill="#fff8e1" stroke="#b58900"/>
+  <text x="77" y="80" text-anchor="middle" font-size="11" font-weight="700">Stage 1</text>
+  <text x="77" y="98" text-anchor="middle" font-size="10">LLM</text>
+  <text x="77" y="115" text-anchor="middle" font-size="10" fill="#666">Understand</text>
+  <text x="77" y="128" text-anchor="middle" font-size="10" fill="#666">request</text>
+
+  <rect x="150" y="60" width="115" height="80" rx="6" fill="#f3eefd" stroke="#6f42c1"/>
+  <text x="207" y="80" text-anchor="middle" font-size="11" font-weight="700">Checkpoint 1</text>
+  <text x="207" y="98" text-anchor="middle" font-size="10">HUMAN</text>
+  <text x="207" y="115" text-anchor="middle" font-size="10" fill="#666">Confirm</text>
+  <text x="207" y="128" text-anchor="middle" font-size="10" fill="#666">interpretation</text>
+
+  <rect x="280" y="60" width="115" height="80" rx="6" fill="#fff8e1" stroke="#b58900"/>
+  <text x="337" y="80" text-anchor="middle" font-size="11" font-weight="700">Stage 2</text>
+  <text x="337" y="98" text-anchor="middle" font-size="10">LLM</text>
+  <text x="337" y="115" text-anchor="middle" font-size="10" fill="#666">Select</text>
+  <text x="337" y="128" text-anchor="middle" font-size="10" fill="#666">formulas</text>
+
+  <rect x="410" y="60" width="115" height="80" rx="6" fill="#f3eefd" stroke="#6f42c1"/>
+  <text x="467" y="80" text-anchor="middle" font-size="11" font-weight="700">Checkpoint 2</text>
+  <text x="467" y="98" text-anchor="middle" font-size="10">HUMAN</text>
+  <text x="467" y="115" text-anchor="middle" font-size="10" fill="#666">Validate</text>
+  <text x="467" y="128" text-anchor="middle" font-size="10" fill="#666">selection</text>
+
+  <rect x="540" y="60" width="115" height="80" rx="6" fill="#e6fffa" stroke="#2c7a7b"/>
+  <text x="597" y="80" text-anchor="middle" font-size="11" font-weight="700">Stage 3</text>
+  <text x="597" y="98" text-anchor="middle" font-size="10">MECH</text>
+  <text x="597" y="115" text-anchor="middle" font-size="10" fill="#666">Extract</text>
+  <text x="597" y="128" text-anchor="middle" font-size="10" fill="#666">contents</text>
+
+  <rect x="670" y="60" width="115" height="80" rx="6" fill="#fff8e1" stroke="#b58900"/>
+  <text x="727" y="80" text-anchor="middle" font-size="11" font-weight="700">Stage 4</text>
+  <text x="727" y="98" text-anchor="middle" font-size="10">LLM</text>
+  <text x="727" y="115" text-anchor="middle" font-size="10" fill="#666">Decompose</text>
+  <text x="727" y="128" text-anchor="middle" font-size="10" fill="#666">formulas</text>
+
+  <rect x="800" y="60" width="115" height="80" rx="6" fill="#fff8e1" stroke="#b58900"/>
+  <text x="857" y="80" text-anchor="middle" font-size="11" font-weight="700">Stage 5</text>
+  <text x="857" y="98" text-anchor="middle" font-size="10">LLM</text>
+  <text x="857" y="115" text-anchor="middle" font-size="10" fill="#666">Produce</text>
+  <text x="857" y="128" text-anchor="middle" font-size="10" fill="#666">JSON spec</text>
+
+  <rect x="930" y="60" width="115" height="80" rx="6" fill="#fff8e1" stroke="#b58900"/>
+  <text x="987" y="80" text-anchor="middle" font-size="11" font-weight="700">Stage 6</text>
+  <text x="987" y="98" text-anchor="middle" font-size="10">LLM</text>
+  <text x="987" y="115" text-anchor="middle" font-size="10" fill="#666">Self-review</text>
+  <text x="987" y="128" text-anchor="middle" font-size="10" fill="#666">(omissions)</text>
+
+  <rect x="1060" y="60" width="115" height="80" rx="6" fill="#e6fffa" stroke="#2c7a7b"/>
+  <text x="1117" y="80" text-anchor="middle" font-size="11" font-weight="700">Stage 7</text>
+  <text x="1117" y="98" text-anchor="middle" font-size="10">MECH</text>
+  <text x="1117" y="115" text-anchor="middle" font-size="10" fill="#666">Generate</text>
+  <text x="1117" y="128" text-anchor="middle" font-size="10" fill="#666">Excel</text>
+
+  <line x1="135" y1="100" x2="148" y2="100" stroke="#666" stroke-width="1.5" marker-end="url(#ah)"/>
+  <line x1="265" y1="100" x2="278" y2="100" stroke="#666" stroke-width="1.5" marker-end="url(#ah)"/>
+  <line x1="395" y1="100" x2="408" y2="100" stroke="#666" stroke-width="1.5" marker-end="url(#ah)"/>
+  <line x1="525" y1="100" x2="538" y2="100" stroke="#666" stroke-width="1.5" marker-end="url(#ah)"/>
+  <line x1="655" y1="100" x2="668" y2="100" stroke="#666" stroke-width="1.5" marker-end="url(#ah)"/>
+  <line x1="785" y1="100" x2="798" y2="100" stroke="#666" stroke-width="1.5" marker-end="url(#ah)"/>
+  <line x1="915" y1="100" x2="928" y2="100" stroke="#666" stroke-width="1.5" marker-end="url(#ah)"/>
+  <line x1="1045" y1="100" x2="1058" y2="100" stroke="#666" stroke-width="1.5" marker-end="url(#ah)"/>
+
+  <rect x="20" y="200" width="14" height="14" fill="#fff8e1" stroke="#b58900"/>
+  <text x="40" y="212" font-size="11">LLM stage</text>
+  <rect x="120" y="200" width="14" height="14" fill="#e6fffa" stroke="#2c7a7b"/>
+  <text x="140" y="212" font-size="11">Mechanical stage</text>
+  <rect x="250" y="200" width="14" height="14" fill="#f3eefd" stroke="#6f42c1"/>
+  <text x="270" y="212" font-size="11">Human checkpoint</text>
+</svg>
+
+<h2>3b. Data flow audit — inputs and outputs of every stage</h2>
+
+<div class="box note">
+<div class="box-label">Why this section exists</div>
+The pipeline is only as solid as the files that flow through it. This audit
+makes explicit, for every stage, exactly what file or object it receives and
+what it produces. The "mechanical preparation" steps (filtering, lookup) are
+trivial in concept but must be built — omitting them is a common source of
+mid-project surprises.
+</div>
+
+<h3>Input files prepared before the pipeline runs</h3>
+
+<table>
+<thead><tr><th>File</th><th>Content</th><th>How it is produced</th><th>Size (Harel)</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>hierarchie_harel.json</code></td>
+  <td>Full parse: numero, titre, page, parent, <b>contenu (source code)</b>, etc. — 9177 blocks.</td>
+  <td>Output of the parsing pipeline (steps 1-9 of the workflow, out of scope here).</td>
+  <td>~6.9 MB</td>
+</tr>
+<tr>
+  <td><code>hierarchie_harel_noms.json</code></td>
+  <td>Same blocks but <b>WITHOUT the contenu field</b>: only numero, niveau, parent, titre, partie, page — 9177 blocks.</td>
+  <td>Mechanical: strip the <code>contenu</code> / <code>contenu_len</code> / <code>a_du_code</code> fields from the full JSON. One line of Python.</td>
+  <td>~1.5 MB (78% smaller)</td>
+</tr>
+</tbody>
+</table>
+
+<div class="box mechanical">
+<div class="box-label">Mechanical pre-step (before Stage 1)</div>
+Produce <code>hierarchie_harel_noms.json</code> from <code>hierarchie_harel.json</code> by removing the source-code fields. This is the file Stages 1 and 2 consume. The full JSON with code is reserved for Stage 3. This separation is what enforces "Stage 1 sees names only" — it is not a prompt instruction alone, it is a data-preparation guarantee.
+</div>
+
+<h3>Stage-by-stage input / output table</h3>
+
+<table>
+<thead>
+<tr><th>Stage</th><th>Type</th><th>Receives</th><th>Produces</th></tr>
+</thead>
+<tbody>
+<tr>
+  <td><b>Mech pre-step</b></td>
+  <td>MECH</td>
+  <td><code>hierarchie_harel.json</code> (full)</td>
+  <td><code>hierarchie_harel_noms.json</code> (no code)</td>
+</tr>
+<tr>
+  <td><b>Stage 1</b></td>
+  <td>LLM</td>
+  <td><code>hierarchie_harel_noms.json</code> + structured user prompt</td>
+  <td><code>stage1_output.json</code> (interpretation, relevant_branches, ambiguities)</td>
+</tr>
+<tr>
+  <td><b>Checkpoint 1</b></td>
+  <td>HUMAN</td>
+  <td>Stage 1 output (shown in UI)</td>
+  <td>Approved/corrected interpretation</td>
+</tr>
+<tr>
+  <td><b>Mech filter</b></td>
+  <td>MECH</td>
+  <td><code>hierarchie_harel_noms.json</code> + relevant_branches from Stage 1</td>
+  <td>Filtered names JSON (only the branches in scope — keeps Stage 2's prompt small)</td>
+</tr>
+<tr>
+  <td><b>Stage 2</b></td>
+  <td>LLM</td>
+  <td>Filtered names JSON + approved interpretation</td>
+  <td><code>stage2_output.json</code> (selected formulas, consumers, dependencies)</td>
+</tr>
+<tr>
+  <td><b>Checkpoint 2</b></td>
+  <td>HUMAN</td>
+  <td>Stage 2 output (shown in UI)</td>
+  <td>Approved/corrected selection</td>
+</tr>
+<tr>
+  <td><b>Stage 3</b></td>
+  <td>MECH</td>
+  <td>Approved selection (numeros) + <code>hierarchie_harel.json</code> (full, WITH code)</td>
+  <td>Selected formulas enriched with their verbatim <code>contenu</code></td>
+</tr>
+<tr>
+  <td><b>Stage 4</b></td>
+  <td>LLM</td>
+  <td>Selected formulas with code (from Stage 3)</td>
+  <td><code>stage4_output.json</code> (branches, shared sub-expressions, identities)</td>
+</tr>
+<tr>
+  <td><b>Stage 5</b></td>
+  <td>LLM</td>
+  <td>Stage 4 output + user prompt</td>
+  <td><code>stage5_output.json</code> (full Excel spec: inputs, calculations, scenario)</td>
+</tr>
+<tr>
+  <td><b>Stage 6</b></td>
+  <td>LLM</td>
+  <td>Stage 5 spec + selected formulas with code (from Stage 3)</td>
+  <td><code>stage6_output.json</code> (omissions list)</td>
+</tr>
+<tr>
+  <td><b>Stage 7</b></td>
+  <td>MECH</td>
+  <td>Stage 5 spec + Stage 6 omissions + selected formulas with code (for the Doc sheet)</td>
+  <td><code>output.xlsx</code></td>
+</tr>
+</tbody>
+</table>
+
+<div class="box note">
+<div class="box-label">Two mechanical sub-steps that are easy to forget</div>
+<ul class="compact">
+  <li><b>The pre-step</b> (strip code) — produces the names-only file for Stage 1. Without it, Stage 1 receives 6.9 MB of code it is not supposed to see.</li>
+  <li><b>The filter</b> (after Checkpoint 1) — narrows the names file to the relevant branches before Stage 2. Without it, Stage 2's prompt carries all 9177 blocks instead of the few hundred in scope. Both are one-function Python steps but they are real code that must be written.</li>
+</ul>
+</div>
+
+<h2>4. Cadrage rules (prepended to every LLM call)</h2>
+
+<div class="box prompt">
+<div class="box-label">Permanent system instructions</div>
+<pre style="background:white; border-left:none; padding:0; font-size:11.5px;">
+1. No hallucination. If a value, formula, number, or name is not explicitly
+   present in the input you were given, do not output it. Use null and
+   explain in a comment field.
+
+2. Verify yourself. Before returning, re-read your output and check every
+   citation against the inputs. If a citation cannot be confirmed, remove
+   the corresponding assertion.
+
+3. Stay structured. Return ONLY valid JSON conforming to the requested
+   schema. No prose outside the JSON fields.
+
+4. No filler. Avoid commentary words ("honestly", "of course",
+   "interestingly"). Output is consumed by a downstream program.
+
+5. Halt rather than guess. If the input is insufficient, return
+   {"halt_reason": str} and stop.
+</pre>
+</div>
+
+<div class="step-card">
+<h2><span class="step-tag tag-llm">STAGE 1 — LLM</span>Understand and frame the request</h2>
+
+<h3>Purpose</h3>
+<p>Take the user's structured prompt and the model hierarchy (names only,
+no formula contents) and produce a clear interpretation of what mechanism
+the user wants to reproduce.</p>
+
+<h3>Inputs</h3>
+<div class="box input">
+<div class="box-label">Inputs to Stage 1</div>
+<ul class="compact">
+  <li><b>The hierarchy, names only</b> — <code>hierarchie_harel_noms.json</code>: numero, titre, page, parent, partie. NO formula contents. (Produced by the mechanical pre-step that strips the code fields.)</li>
+  <li><b>The user prompt</b>, structured in 4 fields:
+    <ul class="compact">
+      <li><i>intro</i> — what is the mechanism about</li>
+      <li><i>formula_types</i> — types of formulas involved</li>
+      <li><i>models</i> — which models are involved</li>
+      <li><i>products</i> — which products are involved</li>
+    </ul>
+  </li>
+</ul>
+</div>
+
+<h3>System prompt</h3>
+<div class="box prompt">
+<div class="box-label">System prompt — Stage 1</div>
+<pre style="background:white; border-left:none; padding:0; font-size:11.5px;">
+You are an expert actuarial developer. You receive the hierarchy of a RAFM
+model: formula names and structural names (model, inputs, variables, etc.).
+The user describes what they want to understand and reproduce.
+
+Your goal in this stage is to PRE-INTERPRET the user's request: confirm
+what mechanism they are asking about, identify which parts of the hierarchy
+are relevant, and surface ambiguities.
+
+You do NOT yet receive formula contents. Work only from names and structure.
+
+User information is approximate. The user knows the model partially and
+provides a best guess. Translate that guess into a precise interpretation
+and flag uncertainties.
+
+Return ONLY valid JSON:
+{
+  "interpretation": str,
+  "relevant_branches": [str],
+  "assumptions": [str],
+  "ambiguities": [str],
+  "confidence": "high" | "medium" | "low",
+  "halt_reason": str | null
+}
+</pre>
+</div>
+
+<h3>Validators</h3>
+<div class="box validation">
+<div class="box-label">Post-LLM validation</div>
+<ul class="compact">
+  <li>Schema parses correctly.</li>
+  <li>Every <code>relevant_branches</code> path exists in the hierarchy.</li>
+  <li>If <code>confidence == "high"</code> but ambiguities is non-empty, retry with a warning.</li>
+</ul>
+</div>
+
+<h3>Checkpoint 1 (human)</h3>
+<div class="box checkpoint">
+<div class="box-label">What the user sees and does</div>
+The interpretation, relevant branches, assumptions, ambiguities.
+<br><br>
+Actions: approve / correct the interpretation / resolve ambiguities. On
+correction, Stage 1 is re-run with the correction in context.
+</div>
+
+</div>
+
+<div class="step-card">
+<h2><span class="step-tag tag-llm">STAGE 2 — LLM</span>Pre-select relevant formulas</h2>
+
+<h3>Purpose</h3>
+<p>Using the validated interpretation from Stage 1 and the hierarchy, select
+the formulas that <i>define</i> the mechanism. Identify dependencies so the
+next stages have a complete subgraph.</p>
+
+<h3>System prompt</h3>
+<div class="box prompt">
+<div class="box-label">System prompt — Stage 2</div>
+<pre style="background:white; border-left:none; padding:0; font-size:11.5px;">
+You are selecting formulas to reproduce a mechanism in Excel. The user's
+intent has been confirmed in Stage 1.
+
+SELECTION PRINCIPLES
+- Distinguish formulas that DEFINE the mechanism from those that CONSUME
+  it. Definers go in "selected"; consumers go in "consumers_for_info".
+- Identify dependencies: if formula X is selected and it calls formula Y
+  (directly or via -> delegation), Y must also be selected.
+- Prefer minimal selection: 4-12 formulas typical.
+- When a formula delegates to a sub-model (obj->method), include the
+  target formula in the sub-model.
+- When a formula has conditional branches (e.g. par_nonpar=="P",
+  old_adif), note which branches are in scope.
+
+NAMING CONVENTIONS YOU MAY ENCOUNTER
+adif, gimla, maslul = life insurance product structures
+_cflow = cashflow model
+par_nonpar = participating vs non-participating
+old_adif = old-regime participating contracts
+Do NOT invent meanings beyond what names and hierarchy reveal.
+
+OUTPUT (ONLY valid JSON)
+{
+  "selected": [
+    {
+      "numero": str,
+      "titre": str,
+      "role_one_line": str,
+      "why_defining": str,
+      "branches_in_scope": [str]
+    }
+  ],
+  "consumers_for_info": [
+    { "numero": str, "titre": str, "consumes_what": str }
+  ],
+  "dependencies_followed": [
+    { "from": str, "to": str, "reason": str }
+  ],
+  "concerns": [str]
+}
+</pre>
+</div>
+
+<h3>Validators</h3>
+<div class="box validation">
+<div class="box-label">Post-LLM validation</div>
+<ul class="compact">
+  <li>Schema correctness.</li>
+  <li>Every <code>numero</code> exists in the hierarchy.</li>
+  <li>Title match for every numero/titre pair.</li>
+  <li>Count: 3-12 in <code>selected</code>; flag outside range.</li>
+  <li>Dependency closure: every numero in <code>dependencies_followed</code> exists in <code>selected</code> or <code>consumers_for_info</code>.</li>
+</ul>
+</div>
+
+<h3>Checkpoint 2 (human)</h3>
+<div class="box checkpoint">
+<div class="box-label">What the user sees and does</div>
+The selected formulas with role and rationale, plus consumers and
+dependencies.
+<br><br>
+Actions: approve / remove items / add items / request explanation. After
+a correction, Stage 2 is re-run with the previous selection and the
+correction passed in context.
+</div>
+
+</div>
+
+<div class="step-card">
+<h2><span class="step-tag tag-mech">STAGE 3 — MECHANICAL</span>Extract formula contents</h2>
+
+<p>For each formula in the approved selection, retrieve its verbatim
+<code>contenu</code> from the parsed JSON. Pure Python, no LLM.</p>
+
+<div class="box mechanical">
+<div class="box-label">What this stage does</div>
+<ul class="compact">
+  <li>Lookup each numero in the parsed JSON</li>
+  <li>Attach the full <code>contenu</code> (verbatim source code) to each entry</li>
+  <li>Pass the enriched selection to Stage 4</li>
+</ul>
+<b>Failure mode:</b> if a numero from the approved selection is not found, halt and escalate.
+</div>
+
+</div>
+
+<div class="step-card">
+<h2><span class="step-tag tag-llm">STAGE 4 — LLM</span>Decompose the formulas</h2>
+
+<h3>Purpose</h3>
+<p>Read the full source code of each selected formula. Identify branches,
+isolate remarkable sub-expressions, and derive any key algebraic identity
+(such as "rate_full − rate_fixed = v × Y" from the reference case).</p>
+
+<h3>System prompt</h3>
+<div class="box prompt">
+<div class="box-label">System prompt — Stage 4</div>
+<pre style="background:white; border-left:none; padding:0; font-size:11.5px;">
+You are reading the verbatim source code of selected formulas. Decompose
+each one into its analytical structure: identify inputs, intermediate
+quantities, branches, and any sub-expression that appears repeatedly and
+deserves to become a named auxiliary variable.
+
+GUIDANCE
+- For each formula, list all inputs (variables and parameters used).
+- For each formula, list all branches (conditional paths) with their tests.
+- Identify shared sub-expressions across formulas: if the same expression
+  appears in 2+ formulas, name it (it becomes an Excel column).
+- If two formulas differ only in one factor or term, articulate the
+  difference algebraically.
+- Identify temporal dependencies: formulas that call themselves at t-1.
+
+OUTPUT (ONLY valid JSON)
+{
+  "formulas": [
+    {
+      "numero": str,
+      "titre": str,
+      "inputs_used": [str],
+      "branches": [
+        { "condition": str, "scope_relevant": bool, "returns": str }
+      ],
+      "temporal_self_reference": bool
+    }
+  ],
+  "shared_subexpressions": [
+    { "name": str, "expression": str, "appears_in": [str] }
+  ],
+  "key_identities": [
+    {
+      "identity": str,
+      "source_formulas": [str],
+      "derivation_summary": str
+    }
+  ],
+  "concerns": [str]
+}
+</pre>
+</div>
+
+<h3>Validators</h3>
+<div class="box validation">
+<div class="box-label">Post-LLM validation</div>
+<ul class="compact">
+  <li>Every numero in <code>formulas</code> matches Stage 3's input.</li>
+  <li>Every formula in <code>shared_subexpressions.appears_in</code> exists in <code>formulas</code>.</li>
+  <li><code>key_identities.source_formulas</code> all exist in the selection.</li>
+</ul>
+</div>
+
+</div>
+
+<div class="step-card">
+<h2><span class="step-tag tag-llm">STAGE 5 — LLM</span>Produce the Excel JSON specification</h2>
+
+<h3>Purpose</h3>
+<p>Convert the Stage 4 decomposition into a complete specification of the
+Excel model: inputs sheet, scenario, calculation columns (in topological
+order), color rules, notes.</p>
+
+<h3>System prompt</h3>
+<div class="box prompt">
+<div class="box-label">System prompt — Stage 5</div>
+<pre style="background:white; border-left:none; padding:0; font-size:11.5px;">
+You are producing a complete Excel specification for the mechanism analysed
+in Stage 4. The specification will be rendered by a deterministic Python
+template — fill the structure, do not write code.
+
+RULES
+1. Every "calculations" entry MUST cite a source_formula_number from
+   Stage 4. Never invent.
+2. Every formula in "calculations" MUST reference only inputs declared in
+   "inputs", or calculations whose column_name appears EARLIER in the list.
+   No forward references.
+3. If a default value cannot be derived from sources, set
+   "default_value": null and explain in "comment".
+4. Distinguish "always_computed" calculations (every period) from
+   "conditional" (with a test).
+5. The "scenario" must exercise both regimes of the mechanism. Default
+   suggestion: 24 periods alternating regimes.
+
+OUTPUT (ONLY valid JSON, exact schema)
+{
+  "mechanism_name": str,
+  "scope_description": str,
+  "key_relation": { "identity": str, "source_formulas": [str] },
+  "inputs": [
+    {
+      "name": str,
+      "label": str,
+      "default_value": number | null,
+      "format": str,
+      "comment": str
+    }
+  ],
+  "scenario": {
+    "driving_input": str,
+    "n_periods": int,
+    "default_values": [number]
+  },
+  "calculations": [
+    {
+      "column_name": str,
+      "label": str,
+      "kind": "always_computed" | "conditional",
+      "formula_excel": str,
+      "condition_excel": str | null,
+      "format": str,
+      "depends_on": [str],
+      "source_formula_number": str,
+      "source_excerpt": str
+    }
+  ],
+  "color_rules": [
+    { "rule_excel": str, "background_hex": str, "label": str }
+  ],
+  "notes": [ { "section": str, "text": str } ]
+}
+</pre>
+</div>
+
+<h3>Validators</h3>
+<div class="box validation">
+<div class="box-label">Post-LLM validation</div>
+<ul class="compact">
+  <li>Schema correctness.</li>
+  <li>Source citation: every <code>source_formula_number</code> exists in Stage 4's output.</li>
+  <li>Topological order: every name in <code>depends_on</code> appears earlier.</li>
+  <li>Formula parseability: identifiers in <code>formula_excel</code> all appear in <code>depends_on</code>.</li>
+  <li>Scenario length matches <code>n_periods</code>.</li>
+  <li>Symbolic smoke test: evaluate the spec in Python on the default scenario; abort if non-finite values appear.</li>
+</ul>
+</div>
+
+</div>
+
+<div class="step-card">
+<h2><span class="step-tag tag-llm">STAGE 6 — LLM</span>Self-review for omissions</h2>
+
+<h3>Purpose</h3>
+<p>Compare the Stage 5 JSON spec to the verbatim source code (from Stage 3)
+and list what the spec simplified or omitted. Non-blocking — informs the
+user, written into the Notes sheet of the final Excel.</p>
+
+<h3>Why on the JSON, not on the Excel</h3>
+<div class="box note">
+<div class="box-label">Note</div>
+The Excel is a binary file with formulas in cells. The JSON spec expresses
+the same content with explicit structure, machine-readable. Auditing the
+JSON is equivalent to auditing the Excel content but much easier for an
+LLM. The Excel is generated downstream from a validated JSON, so auditing
+the JSON is sufficient.
+</div>
+
+<h3>System prompt</h3>
+<div class="box prompt">
+<div class="box-label">System prompt — Stage 6</div>
+<pre style="background:white; border-left:none; padding:0; font-size:11.5px;">
+You are auditing an Excel-model specification against its source formulas.
+Identify what the specification has simplified or omitted compared to the
+source code.
+
+RULES
+1. Read each source formula carefully. Identify every input, every branch,
+   every term, every special case.
+2. For each, check whether the specification covers it.
+3. Be specific. Not "the model is simplified" but "claims_maturity_honi(t)
+   appears in the source units_e formula but is absent from the spec.
+   Impact: units stay larger than in the real model."
+4. Classify each omission:
+   - "deliberate"   — reasonable simplification
+   - "branch"       — code branch not modelled
+   - "concerning"   — may produce wrong results
+5. Cite source_formula_number and excerpt for each omission.
+
+OUTPUT (ONLY valid JSON)
+{
+  "omissions": [
+    {
+      "kind": "deliberate" | "branch" | "concerning",
+      "summary": str,
+      "impact_one_line": str,
+      "source_formula_number": str,
+      "source_excerpt": str
+    }
+  ],
+  "overall_concerns": [str]
+}
+</pre>
+</div>
+
+<h3>How the output is used</h3>
+<div class="box output">
+<div class="box-label">Wiring back</div>
+The omissions array is written into the Notes sheet of the Excel, grouped
+by kind. Concerning items first, highlighted; deliberate items last,
+neutral colour.
+</div>
+
+</div>
+
+<div class="step-card">
+<h2><span class="step-tag tag-mech">STAGE 7 — MECHANICAL</span>Generate the Excel file</h2>
+
+<h3>Excel structure</h3>
+<table>
+<thead><tr><th>Sheet</th><th>Content</th></tr></thead>
+<tbody>
+<tr><td><b>Doc</b></td><td>All selected formulas (numero, titre, page, verbatim code). Source of truth.</td></tr>
+<tr><td><b>Inputs</b></td><td>One row per <code>inputs</code> entry, yellow value cells, named ranges. Scenario table below.</td></tr>
+<tr><td><b>Model</b></td><td>Projection: one row per period, columns in order of <code>calculations</code>. Formulas with names resolved. Conditional formatting from <code>color_rules</code>.</td></tr>
+<tr><td><b>Notes</b></td><td>One section per <code>notes</code> entry, plus the "What this model does not include" section populated by Stage 6 grouped by omission kind.</td></tr>
+</tbody>
+</table>
+
+<h3>Validators</h3>
+<div class="box validation">
+<div class="box-label">Post-generation validation</div>
+<ul class="compact">
+  <li>Recalc check: zero <code>#REF</code>, <code>#NAME</code>, <code>#DIV/0</code>, <code>#VALUE</code> errors.</li>
+  <li>Formula count = <code>n_periods × |calculations|</code>.</li>
+  <li>Named ranges: all inputs have defined named ranges.</li>
+  <li>Output sanity: all calculated values are finite on the default scenario.</li>
+</ul>
+<p style="margin-top:8px;"><b>On failure:</b> halt; broken file kept for inspection; escalate to human.</p>
+</div>
+
+</div>
+
+<h2>Answers to the open questions</h2>
+
+<div class="qa-block">
+<div class="q">Q1 — Does Stage 1 need a memory system, and if so, what does it store?</div>
+No persistent memory system is needed for the POC. What is needed is
+<i>in-session state</i>: the validated Stage 1 output is held in the
+orchestrator's memory and passed to subsequent stages. The orchestrator's
+state is a Python dict containing the outputs of each stage. No database,
+no vector store, no embedding cache.
+<br><br>
+Inter-session memory (caching past mechanisms analysed by the user) is a
+V2 feature, not part of the POC.
+</div>
+
+<div class="qa-block">
+<div class="q">Q2 — Should the instruction prompt specify how to select variables?</div>
+Yes, but with <b>principles rather than procedure</b>. The Stage 2 prompt
+embeds five selection principles (definers vs consumers, dependency
+closure, minimal selection, sub-model delegation, branch identification).
+These are derived from the reference conversation where these exact
+distinctions had to be made manually.
+<br><br>
+Domain context is provided sparingly. The prompt explains naming
+conventions (adif, gimla, _cflow, etc.) but explicitly forbids invention
+of meaning beyond what the hierarchy reveals. Over-injecting domain
+context increases the LLM's confidence and therefore its hallucination
+risk.
+</div>
+
+<div class="qa-block">
+<div class="q">Q3 — How is memory managed across human corrections?</div>
+By <b>rebuilding context at each turn</b>, not by maintaining a persistent
+state in the LLM. On a re-run after a human correction:
+<br><br>
+<ul class="compact">
+  <li>The orchestrator prepares a new prompt containing: the original user prompt, the hierarchy, the previous selection, the human correction, and an instruction to reconcile.</li>
+  <li>The LLM produces a new selection.</li>
+  <li>The new selection replaces the old one in the orchestrator's state.</li>
+</ul>
+This is deterministic and auditable. The cost is a larger prompt each
+turn, which is negligible for the POC (3-4 turns maximum in practice).
+</div>
+
+<h2>Error handling matrix</h2>
+
+<table>
+<thead><tr><th>Failure mode</th><th>Detection</th><th>Response</th></tr></thead>
+<tbody>
+<tr><td>LLM cites a numero that does not exist</td><td>Validator (Stages 1, 2, 4, 5)</td><td>Retry up to 2 times with the error. Halt after 3 failures.</td></tr>
+<tr><td>LLM sets a default value with no source</td><td>Stage 5 validator</td><td>Retry asking for null + explanation.</td></tr>
+<tr><td>Calculation references undeclared name</td><td>Topological-order check (Stage 5)</td><td>Retry with the undeclared name highlighted.</td></tr>
+<tr><td>JSON schema parsing fails</td><td>Instructor automatic validation</td><td>Instructor handles retry automatically.</td></tr>
+<tr><td>Excel recalc produces errors</td><td>Stage 7 post-generation</td><td>Halt; keep broken file; escalate.</td></tr>
+<tr><td>User keeps correcting (>5 times)</td><td>Retry counter at checkpoints</td><td>Suggest restarting with a refined initial prompt.</td></tr>
+<tr><td>LLM returns halt_reason</td><td>Stage parser detects field</td><td>Stop, show reason, ask for guidance.</td></tr>
+</tbody>
+</table>
+
+<h2>Known limitations</h2>
+
+<div class="box note">
+<div class="box-label">Honest gaps in this design</div>
+<ul class="compact">
+  <li><b>Single-mechanism scope per run.</b> If the user wants two mechanisms in the same Excel, they run twice and merge manually.</li>
+  <li><b>No incremental updates.</b> Re-running with a different prompt restarts the pipeline; no diff-based update.</li>
+  <li><b>Domain knowledge ceiling.</b> The LLM is competent on RAFM conventions but will struggle on niche mechanisms not documented in the parsed audit. Checkpoint 1 exists to surface this.</li>
+  <li><b>No automated numerical validation of the Excel.</b> The pipeline checks Excel for syntactic errors (#REF, #NAME, #DIV/0) but does not re-execute the spec in Python to verify that cells produce the expected values. A formula translation error that does not crash Excel will not be caught automatically. The user is responsible for spot-checking key cells against the source.</li>
+  <li><b>No model versioning.</b> If the parsed model evolves, previous Excels are not flagged as outdated.</li>
+  <li><b>Cost not budgeted.</b> No token-cost estimation or alerting yet.</li>
+</ul>
+</div>
+
+<h2>Concrete next steps for implementation</h2>
+
+<ol>
+<li><b>Lock the Pydantic schemas.</b> Translate the 6 JSON output schemas into Pydantic models. These are the contract.</li>
+<li><b>Build the Stage 7 Excel template.</b> Port the openpyxl code from the reference work, parametrised by the Stage 5 JSON.</li>
+<li><b>Build the data preparation steps.</b> Two small Python functions: (a) strip the code fields to produce the names-only JSON for Stage 1; (b) filter the names JSON to the relevant branches after Checkpoint 1. Both are one-function steps but must exist.</li>
+<li><b>Implement Stage 3 (mechanical lookup).</b> Pure Python, low risk.</li>
+<li><b>Implement the validators.</b> Mostly Pydantic schema checks + cross-references against the input hierarchy.</li>
+<li><b>Wire the orchestrator.</b> Python script, one function per stage, state passed via a dict.</li>
+<li><b>Build a minimal interface.</b> CLI or Jupyter notebook for the POC. Streamlit for demo if needed.</li>
+<li><b>Test on the Harel MF/BOR reference case.</b> The reference conversation produced a known-good output. Reproducing it is the POC success criterion.</li>
+<li><b>Iterate on prompts.</b> Expect 3-5 rounds of refinement.</li>
+</ol>
+
+</body>
+</html>

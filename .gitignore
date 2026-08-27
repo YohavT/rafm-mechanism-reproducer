@@ -1,0 +1,29 @@
+# secrets / local env
+.env
+.streamlit/secrets.toml
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# virtualenvs
+.venv/
+.venv2/
+venv/
+
+# run outputs
+runs/
+
+# editor temp leftovers
+*.tmp.*
+
+# client model data (obtain separately - see README)
+*.xlsx
+docs/*.json
+
+# local Claude Code permissions (machine-specific paths)
+.claude/

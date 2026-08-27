@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>End-to-end workflow — Harel audit PDF → simplified MF/BOR Excel model</title>
+<style>
+  body {
+    font-family: -apple-system, sans-serif;
+    padding: 24px;
+    background: #fafafa;
+    color: #222;
+    max-width: 1280px;
+    margin: 0 auto;
+    line-height: 1.5;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #666; font-size: 13px; margin-bottom: 24px; }
+  h2 { font-size: 15px; color: #2F5597; margin-top: 28px; border-bottom: 1px solid #ddd; padding-bottom: 4px;}
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 20px; font-size: 12px; background: white; }
+  th, td { border: 1px solid #ccc; padding: 8px 10px; vertical-align: top; text-align: left; }
+  th { background: #2F5597; color: white; font-weight: 600; }
+  td.step { width: 4%; text-align: center; font-weight: 700; background: #f0f4f9; color: #2F5597; font-size: 16px; }
+  td.phase { width: 12%; font-weight: 700; }
+  td.action { width: 26%; }
+  td.output { width: 24%; font-family: 'SF Mono', Consolas, monospace; font-size: 11px; color: #333; }
+  td.correction { width: 34%; color: #856404; background: #fffbe6; font-size: 11.5px; }
+  .phase-parse { background: #dbe5f1; }
+  .phase-tree { background: #e2efda; }
+  .phase-target { background: #fff2cc; }
+  .phase-analyze { background: #fbe5d6; }
+  .phase-model { background: #f4cccc; }
+  code { font-family: 'SF Mono', Consolas, monospace; font-size: 11px; background: #f0f0f0; padding: 1px 4px; border-radius: 3px;}
+  .summary-box {
+    background: white;
+    border: 1px solid #ccc;
+    border-left: 4px solid #2F5597;
+    padding: 14px 18px;
+    margin: 12px 0 20px;
+    font-size: 13px;
+  }
+  .principle { background: #fff2cc; border-left-color: #b58900;}
+  ol li, ul li { margin-bottom: 4px; }
+  svg { display:block; margin: 12px auto; background: white; border: 1px solid #ddd; border-radius: 6px;}
+</style>
+</head>
+<body>
+
+<h1>End-to-end workflow</h1>
+<div class="sub">From the upload of the Harel audit PDF (4 199 pages) to the simplified Excel model reproducing the management fee + BOR mechanism for old-adif participating products.</div>
+
+<!-- ============================== -->
+<!-- OVERVIEW SVG -->
+<!-- ============================== -->
+
+<h2>Bird's-eye view</h2>
+
+<svg viewBox="0 0 1240 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#666"/>
+    </marker>
+  </defs>
+
+  <!-- 5 phases as boxes -->
+  <g>
+    <rect x="20"   y="40" width="210" height="120" rx="8" fill="#dbe5f1" stroke="#2F5597"/>
+    <text x="125" y="65"  text-anchor="middle" font-size="13" font-weight="700">PHASE 1</text>
+    <text x="125" y="86"  text-anchor="middle" font-size="12" font-weight="600">Parse</text>
+    <text x="125" y="108" text-anchor="middle" font-size="10" fill="#555">Extract all titles &amp;</text>
+    <text x="125" y="122" text-anchor="middle" font-size="10" fill="#555">contents from PDF</text>
+    <text x="125" y="148" text-anchor="middle" font-size="10" font-style="italic" fill="#888">→ flat JSON</text>
+  </g>
+  <line x1="230" y1="100" x2="265" y2="100" stroke="#666" stroke-width="2" marker-end="url(#ah)"/>
+
+  <g>
+    <rect x="265"  y="40" width="210" height="120" rx="8" fill="#e2efda" stroke="#548235"/>
+    <text x="370"  y="65" text-anchor="middle" font-size="13" font-weight="700">PHASE 2</text>
+    <text x="370"  y="86" text-anchor="middle" font-size="12" font-weight="600">Hierarchize</text>
+    <text x="370"  y="108" text-anchor="middle" font-size="10" fill="#555">Rebuild the tree by</text>
+    <text x="370"  y="122" text-anchor="middle" font-size="10" fill="#555">numbering (1.1.1...)</text>
+    <text x="370"  y="148" text-anchor="middle" font-size="10" font-style="italic" fill="#888">→ tree JSON + Excel</text>
+  </g>
+  <line x1="475" y1="100" x2="510" y2="100" stroke="#666" stroke-width="2" marker-end="url(#ah)"/>
+
+  <g>
+    <rect x="510"  y="40" width="210" height="120" rx="8" fill="#fff2cc" stroke="#b58900"/>
+    <text x="615"  y="65" text-anchor="middle" font-size="13" font-weight="700">PHASE 3</text>
+    <text x="615"  y="86" text-anchor="middle" font-size="12" font-weight="600">Target</text>
+    <text x="615"  y="108" text-anchor="middle" font-size="10" fill="#555">Narrow to MF/InvInc</text>
+    <text x="615"  y="122" text-anchor="middle" font-size="10" fill="#555">in adif &amp; fund</text>
+    <text x="615"  y="148" text-anchor="middle" font-size="10" font-style="italic" fill="#888">→ targeted Excels</text>
+  </g>
+  <line x1="720" y1="100" x2="755" y2="100" stroke="#666" stroke-width="2" marker-end="url(#ah)"/>
+
+  <g>
+    <rect x="755"  y="40" width="210" height="120" rx="8" fill="#fbe5d6" stroke="#cc6600"/>
+    <text x="860"  y="65" text-anchor="middle" font-size="13" font-weight="700">PHASE 4</text>
+    <text x="860"  y="86" text-anchor="middle" font-size="12" font-weight="600">Analyze</text>
+    <text x="860"  y="108" text-anchor="middle" font-size="10" fill="#555">Decompose the</text>
+    <text x="860"  y="122" text-anchor="middle" font-size="10" fill="#555">mechanism algebraically</text>
+    <text x="860"  y="148" text-anchor="middle" font-size="10" font-style="italic" fill="#888">→ dependency graph + notes</text>
+  </g>
+  <line x1="965" y1="100" x2="1000" y2="100" stroke="#666" stroke-width="2" marker-end="url(#ah)"/>
+
+  <g>
+    <rect x="1000" y="40" width="220" height="120" rx="8" fill="#f4cccc" stroke="#a00000"/>
+    <text x="1110" y="65" text-anchor="middle" font-size="13" font-weight="700">PHASE 5</text>
+    <text x="1110" y="86" text-anchor="middle" font-size="12" font-weight="600">Reproduce</text>
+    <text x="1110" y="108" text-anchor="middle" font-size="10" fill="#555">Build a live Excel model</text>
+    <text x="1110" y="122" text-anchor="middle" font-size="10" fill="#555">with formulas</text>
+    <text x="1110" y="148" text-anchor="middle" font-size="10" font-style="italic" fill="#888">→ simplified MF/BOR model</text>
+  </g>
+</svg>
+
+<!-- ============================== -->
+<!-- GUIDING PRINCIPLES -->
+<!-- ============================== -->
+
+<h2>Guiding principles applied throughout</h2>
+
+<div class="summary-box principle">
+  <b>1. No hallucination.</b> Every value, every dependency, every rule comes from the code in the PDF. When the code does not say something, we say so explicitly rather than fill the gap.<br><br>
+  <b>2. Mechanical extraction, not LLM inference.</b> Links between variables are computed by pattern matching on the code, not guessed by a language model. The LLM only explains structures that are already certain.<br><br>
+  <b>3. Verify before stacking layers.</b> Each phase is validated (sanity tests, sample inspection) before the next phase is built on top. A defect found early costs an hour; the same defect found three layers later costs days.<br><br>
+  <b>4. Explicit caveats.</b> Every simplification is named in writing inside the deliverable, not hidden in a conversation.
+</div>
+
+<!-- ============================== -->
+<!-- DETAILED WORKFLOW TABLE -->
+<!-- ============================== -->
+
+<h2>Detailed workflow — step by step</h2>
+
+<div style="display:flex; gap:14px; font-size:12px; margin-bottom:10px; flex-wrap:wrap;">
+  <span style="background:#e2efda; padding:4px 10px; border-left:3px solid #548235; border-radius:3px;">
+    <b style="color:#548235;">Automatable</b> — pure code, no LLM required
+  </span>
+  <span style="background:#fbe5d6; padding:4px 10px; border-left:3px solid #cc6600; border-radius:3px;">
+    <b style="color:#cc6600;">Mixed</b> — code essential, but LLM/human spotted or decided something
+  </span>
+  <span style="background:#fff2cc; padding:4px 10px; border-left:3px solid #b58900; border-radius:3px;">
+    <b style="color:#b58900;">LLM needed</b> — semantic understanding, classification, or interpretation
+  </span>
+</div>
+
+
+
+<div style="display:flex; gap:14px; font-size:12px; margin-bottom:14px; flex-wrap:wrap; margin-top:6px;">
+  <span style="background:#eef6f8; padding:4px 10px; border-left:3px solid #1f6391; border-radius:3px;">
+    <b style="color:#1f6391;">CADRAGE</b> — instructions permanentes (system prompt)
+  </span>
+  <span style="background:#fef5e7; padding:4px 10px; border-left:3px solid #cc6600; border-radius:3px;">
+    <b style="color:#cc6600;">SCOPE</b> — délimitation du périmètre (au début ou en cours de route)
+  </span>
+  <span style="background:#fdecea; padding:4px 10px; border-left:3px solid #c0392b; border-radius:3px;">
+    <b style="color:#c0392b;">CORRECTIF</b> — l'utilisateur a rattrapé une dérive du LLM
+  </span>
+</div>
+<table>
+  <colgroup>
+    <col style="width:3%;">
+    <col style="width:8%;">
+    <col style="width:18%;">
+    <col style="width:16%;">
+    <col style="width:20%;">
+    <col style="width:13%;">
+    <col style="width:22%;">
+  </colgroup>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Phase</th>
+      <th>Action</th>
+      <th>Output / artifact</th>
+      <th>What had to be corrected mid-course</th>
+      <th>LLM intervention</th>
+      <th>User prompts / instructions required</th>
+    </tr>
+  </thead>
+  <tbody>
+
+  <!-- PHASE 1 - PARSING -->
+  <tr>
+    <td class="step phase-parse">1</td>
+    <td class="phase phase-parse">1. Parse</td>
+    <td class="action">Upload <code>AuditReport.pdf</code> (Harel, 4 199 pages). First inventory: confirm it is a RiskAgility FM audit, identify the model (<code>1.Life</code>), count pages, sample a few pages to see the layout.</td>
+    <td class="output">Identified: 4 parts initially (Summary, Input Manager, Code Manager, Appendix — later corrected to include part 5).</td>
+    <td class="correction">—</td>
+      <td class="llm-automatable" style="background:#e2efda; color:#548235; font-size:11px; vertical-align:top;"><b>Automatable</b><br><span style="color:#333; font-weight:400;">Inventory: extract pages, sample text. Pure code.</span></td>
+      <td style="vertical-align:top; padding:6px;"><div style="background:#fef5e7; border-left:2px solid #cc6600; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#cc6600;">SCOPE.</b> « le but est de creer cette hierarchie »</div><div style="background:#eef6f8; border-left:2px solid #1f6391; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#1f6391;">CADRAGE.</b> « sans hallucination » (instruction permanente)</div><div style="background:#eef6f8; border-left:2px solid #1f6391; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#1f6391;">CADRAGE.</b> « vasy page par page, je ne suis pas presse »</div></td>
+  </tr>
+
+  <tr>
+    <td class="step phase-parse">2</td>
+    <td class="phase phase-parse">1. Parse</td>
+    <td class="action">Run the existing Migdal parser on the new PDF as-is, to test if it generalises.</td>
+    <td class="output">Initial result: only 13 blocks detected out of 4 199 pages. Failure.</td>
+    <td class="correction"><b>Correction #1.</b> pymupdf returns titles split on two lines (<code>"4.1.1.1.1.300"</code> on one line, <code>"variable_name"</code> on the next) — unlike pdfplumber which returned them concatenated. Title detection was extended to handle both single-line and two-line formats.</td>
+      <td class="llm-automatable" style="background:#e2efda; color:#548235; font-size:11px; vertical-align:top;"><b>Automatable</b><br><span style="color:#333; font-weight:400;">Run parser. Pure code (initial failure was a code bug, not an LLM-required step).</span></td>
+      <td style="vertical-align:top; padding:6px;"><span style="color:#aaa; font-size:11px;">—</span></td>
+  </tr>
+
+  <tr>
+    <td class="step phase-parse">3</td>
+    <td class="phase phase-parse">1. Parse</td>
+    <td class="action">Re-run parser. Memory died around page 2 400.</td>
+    <td class="output">Failure: process killed.</td>
+    <td class="correction"><b>Correction #2.</b> pdfplumber accumulates memory linearly even with <code>flush_cache</code> (≈ 1.5 GB per 1 000 pages). Switched to <b>pymupdf</b>: ~100× faster, constant memory footprint. The entire 4 199-page parse now takes seconds.</td>
+      <td class="llm-automatable" style="background:#e2efda; color:#548235; font-size:11px; vertical-align:top;"><b>Automatable</b><br><span style="color:#333; font-weight:400;">Memory diagnostic. Pure code (resource profiling).</span></td>
+      <td style="vertical-align:top; padding:6px;"><span style="color:#aaa; font-size:11px;">—</span></td>
+  </tr>
+
+  <tr>
+    <td class="step phase-parse">4</td>
+    <td class="phase phase-parse">1. Parse</td>
+    <td class="action">Re-run. 7 142 blocks now detected. Sanity check: numbering hierarchy, page ordering, sample contents.</td>
+    <td class="output"><code>hierarchie_harel.json</code> (first version, 3 parts).</td>
+    <td class="correction"><b>Correction #3.</b> One false-positive title (<code>3.5 Length:</code> at page 763, inside a metadata field) detected by inspection. A duplicate-cleanup step was added: when the same number appears twice, keep the occurrence whose siblings are adjacent in the document.</td>
+      <td class="llm-mixed" style="background:#fbe5d6; color:#cc6600; font-size:11px; vertical-align:top;"><b>Mixed</b><br><span style="color:#333; font-weight:400;">Re-run + sanity check. <b>LLM/human</b> spotted the false-positive '3.5 Length:' by inspecting context.</span></td>
+      <td style="vertical-align:top; padding:6px;"><div style="background:#eef6f8; border-left:2px solid #1f6391; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#1f6391;">CADRAGE.</b> « je vais te demander de verifier »</div></td>
+  </tr>
+
+  <tr>
+    <td class="step phase-parse">5</td>
+    <td class="phase phase-parse">1. Parse</td>
+    <td class="action">User points out: "formulas exist, from page 2 940 onwards". Inspect: yes, real C-like code is there. <b>It is part 5</b>, which the parser was rejecting because it only allowed parts 1–4.</td>
+    <td class="output">Part 5 (Appendix → Formulas) discovered, ~1 300 pages of code.</td>
+    <td class="correction"><b>Correction #4.</b> Part-1 title rule relaxed to allow part 5 (with no name check, since the title varies). 2 034 additional blocks recovered.</td>
+      <td class="llm-mixed" style="background:#fbe5d6; color:#cc6600; font-size:11px; vertical-align:top;"><b>Mixed</b><br><span style="color:#333; font-weight:400;">Part 5 discovery. <b>LLM/human</b> recognised that page 2940 content was code, despite no '5 Appendix' title.</span></td>
+      <td style="vertical-align:top; padding:6px;"><div style="background:#fdecea; border-left:2px solid #c0392b; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#c0392b;">CORRECTIF.</b> <b>« les formules existent a partir de la page 2940 »</b> — sans ce prompt, j'avais conclu a tort qu'il n'y avait pas de formules dans ce rapport</div></td>
+  </tr>
+
+  <tr>
+    <td class="step phase-parse">6</td>
+    <td class="phase phase-parse">1. Parse — done</td>
+    <td class="action">Final parse: 9 177 blocks across 4 parts (Summary 9, Input Manager 921, Code Manager 6 213, Formulas 2 034). Sanity tests: no duplicates, no orphans, no level inconsistencies.</td>
+    <td class="output"><b><code>hierarchie_harel.json</code></b> (final, 9 177 blocks).</td>
+    <td class="correction">—</td>
+      <td class="llm-automatable" style="background:#e2efda; color:#548235; font-size:11px; vertical-align:top;"><b>Automatable</b><br><span style="color:#333; font-weight:400;">Final parse + automated coherence checks. Pure code.</span></td>
+      <td style="vertical-align:top; padding:6px;"><span style="color:#aaa; font-size:11px;">—</span></td>
+  </tr>
+
+  <!-- PHASE 2 - HIERARCHY VISUALISATION -->
+  <tr>
+    <td class="step phase-tree">7</td>
+    <td class="phase phase-tree">2. Hierarchize</td>
+    <td class="action">User asks: "give me the hierarchy of titles only, in tabular form, no contents needed". Build a tree where each block has its number, page, title, and children. Drop the contents.</td>
+    <td class="output"><code>hierarchie_harel_arbre.json</code> (nested tree, 1.4 MB).</td>
+    <td class="correction">—</td>
+      <td class="llm-automatable" style="background:#e2efda; color:#548235; font-size:11px; vertical-align:top;"><b>Automatable</b><br><span style="color:#333; font-weight:400;">Tree construction from flat list. Pure code.</span></td>
+      <td style="vertical-align:top; padding:6px;"><div style="background:#fef5e7; border-left:2px solid #cc6600; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#cc6600;">SCOPE.</b> <b>« prend en compte qu'il n'y a pas besoin d'extraire le contenu des formules, pour l'instant uniquement les titres »</b> — recadrage majeur de scope</div></td>
+  </tr>
+
+  <tr>
+    <td class="step phase-tree">8</td>
+    <td class="phase phase-tree">2. Hierarchize</td>
+    <td class="action">User asks: "give me an Excel with one column per hierarchy level so I can verify". Build an Excel where each block's title appears in the column matching its level (1 to 7), with subtle color-coding by depth.</td>
+    <td class="output"><b><code>hierarchie_harel.xlsx</code></b> (7 142 rows × 9 cols).</td>
+    <td class="correction">—</td>
+      <td class="llm-automatable" style="background:#e2efda; color:#548235; font-size:11px; vertical-align:top;"><b>Automatable</b><br><span style="color:#333; font-weight:400;">Excel export with one column per level. Pure code.</span></td>
+      <td style="vertical-align:top; padding:6px;"><div style="background:#fef5e7; border-left:2px solid #cc6600; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#cc6600;">SCOPE.</b> « plusieurs colonnes, chaque colonne represente un niveau de hierarchie »</div></td>
+  </tr>
+
+  <tr>
+    <td class="step phase-tree">9</td>
+    <td class="phase phase-tree">2. Hierarchize</td>
+    <td class="action">Run a coherence battery: duplicate detection, parent existence, level vs numbering, sibling sequence gaps, suspicious title lengths, page ordering, part-by-part profile.</td>
+    <td class="output">All 7 checks green. 12 very short titles flagged (<code>bx, by, bz...</code>) — confirmed to be legitimate short variable names after inspection.</td>
+    <td class="correction">—</td>
+      <td class="llm-mixed" style="background:#fbe5d6; color:#cc6600; font-size:11px; vertical-align:top;"><b>Mixed</b><br><span style="color:#333; font-weight:400;">Sanity battery is code. But <b>LLM/human</b> confirmed that flagged short names ('bx, by, bz') were legitimate, not artefacts.</span></td>
+      <td style="vertical-align:top; padding:6px;"><div style="background:#eef6f8; border-left:2px solid #1f6391; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#1f6391;">CADRAGE.</b> « verifie si la hierarchie fait sens »</div></td>
+  </tr>
+
+  <!-- PHASE 3 - TARGETING -->
+  <tr>
+    <td class="step phase-target">10</td>
+    <td class="phase phase-target">3. Target</td>
+    <td class="action">User narrows scope: "in <code>adif_cflow</code>, find everything related to investment income and management fees — the goal is to understand how the variable fee deduction mechanism works". Find <code>adif_cflow</code> in the tree, list its descendants, filter on relevant keywords (<code>mgt_fee, investment_income, …</code>).</td>
+    <td class="output">First target Excel: 22 formulas across 5 logical groups (rates, return/income, fee deduction, other charges, present values).</td>
+    <td class="correction">—</td>
+      <td class="llm-llm" style="background:#fff2cc; color:#b58900; font-size:11px; vertical-align:top;"><b>LLM needed</b><br><span style="color:#333; font-weight:400;"><b>Targeting requires semantic reading</b>: filter by keyword is code, but identifying that 'inv_inc_*' is investment income, or that comm_dn 'consumes' fees, requires understanding the code's meaning.</span></td>
+      <td style="vertical-align:top; padding:6px;"><div style="background:#fef5e7; border-left:2px solid #cc6600; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#cc6600;">SCOPE.</b> « sort moi toutes les formules du group adif_cflow »</div><div style="background:#fef5e7; border-left:2px solid #cc6600; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#cc6600;">SCOPE.</b> « relatives a tout ce qui relate de investment income et management fee »</div></td>
+  </tr>
+
+  <tr>
+    <td class="step phase-target">11</td>
+    <td class="phase phase-target">3. Target</td>
+    <td class="action">User expands: "also include <code>fund_cflow</code>, and English only". Combine adif (33 hits) + fund (11 hits) = 44 formulas, reorganised into 8 logical groups including a "downstream consumers" bucket for variables that consume fees but don't compute them.</td>
+    <td class="output"><b><code>MF_InvInc_adif_and_fund.xlsx</code></b>.</td>
+    <td class="correction"><b>Note.</b> Initial classification missed the <code>inv_inc_*</code> prefix variant; reclassified into "Investment return &amp; income" after inspecting the "Other" bucket.</td>
+      <td class="llm-llm" style="background:#fff2cc; color:#b58900; font-size:11px; vertical-align:top;"><b>LLM needed</b><br><span style="color:#333; font-weight:400;"><b>Logical grouping into 8 buckets</b> (rates / fees / BOR / charges / PVs / units / downstream) is a semantic classification, not a regex match.</span></td>
+      <td style="vertical-align:top; padding:6px;"><div style="background:#fef5e7; border-left:2px solid #cc6600; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#cc6600;">SCOPE.</b> <b>« le excel reste en anglais, pas de francais »</b> — contrainte linguistique explicite</div><div style="background:#fef5e7; border-left:2px solid #cc6600; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#cc6600;">SCOPE.</b> « amene toutes les formulas qui calculent les MF full, variable et fixed, de adif et fund »</div></td>
+  </tr>
+
+  <tr>
+    <td class="step phase-target">12</td>
+    <td class="phase phase-target">3. Target</td>
+    <td class="action">User narrows further: "for old-participating products with BOR mechanism, find the 3-4 formulas that define the mechanism end-to-end". Cross-reference: formulas that mention both <code>par_nonpar</code> and <code>BOR/variable</code>, plus the formulas they depend on.</td>
+    <td class="output"><b><code>MF_mechanism_old_participating.xlsx</code></b> — 4 formulas: <code>mgt_fee_rate_basic</code> (core with BOR test), <code>mgt_fee_rate_basic_fixed</code> (sister without variable), <code>mgt_fee_bor</code> (debt dynamics), <code>investment_income</code> (closes the loop).</td>
+    <td class="correction">—</td>
+      <td class="llm-llm" style="background:#fff2cc; color:#b58900; font-size:11px; vertical-align:top;"><b>LLM needed</b><br><span style="color:#333; font-weight:400;"><b>Narrowing to the 3-4 defining formulas</b> requires understanding which formulas <i>define</i> vs <i>apply</i> the mechanism.</span></td>
+      <td style="vertical-align:top; padding:6px;"><div style="background:#fdecea; border-left:2px solid #c0392b; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#c0392b;">CORRECTIF.</b> <b>Je crois que leur numero de fond est 300 mais sur</b> — j'ai du clarifier que le filtre etait par_nonpar=='P' et old_adif, pas le fond 300</div><div style="background:#fef5e7; border-left:2px solid #cc6600; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#cc6600;">SCOPE.</b> « on va se focus sur les management fee full et ce qui les constitue en dehors des MF fixed »</div></td>
+  </tr>
+
+  <!-- PHASE 4 - ANALYSIS -->
+  <tr>
+    <td class="step phase-analyze">13</td>
+    <td class="phase phase-analyze">4. Analyze</td>
+    <td class="action">Build a dependency graph (HTML/SVG) of the 12 core variables, with three layers (rates → fees → aggregations) and arrows showing: normal call, temporal (t−1), recursive, delegation (via sm_fund_pp/pup).</td>
+    <td class="output"><b><code>MF_mechanism_dependency_graph.html</code></b>.</td>
+    <td class="correction">—</td>
+      <td class="llm-llm" style="background:#fff2cc; color:#b58900; font-size:11px; vertical-align:top;"><b>LLM needed</b><br><span style="color:#333; font-weight:400;"><b>Layered graph layout</b> (rates → fees → aggregations), edge typing (normal / temporal / recursive / delegation), colour scheme — these require understanding the nature of each link.</span></td>
+      <td style="vertical-align:top; padding:6px;"><div style="background:#fdecea; border-left:2px solid #c0392b; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#c0392b;">CORRECTIF.</b> <b>« trop d'explications verbales, ca aide pas, je pense qu'il faut creer un graphe »</b> — recadrage de la forme : moins de texte, plus de visuel</div></td>
+  </tr>
+
+  <tr>
+    <td class="step phase-analyze">14</td>
+    <td class="phase phase-analyze">4. Analyze</td>
+    <td class="action">Algebraic decomposition: prove that <code>rate_full − rate_fixed = mgt_fee_variable × Y</code>, where <code>Y = (1+ret) × (1 − fixed_col/12) − 1</code> is the residual yield after the fixed fee. The "variable component" is exactly a share of Y.</td>
+    <td class="output"><b><code>MF_full_decomposition.html</code></b> with worked numerical example.</td>
+    <td class="correction"><b>Honesty note.</b> Initial example used illustrative numbers (0.5% return, 1.2% fixed, 15% var) without marking them as illustrative — user flagged it. Replaced with explicitly labelled illustrative values, then re-run with user-provided scenario (−1% return, 0.6% fixed, 15% var) to show how the BOR is created.</td>
+      <td class="llm-llm" style="background:#fff2cc; color:#b58900; font-size:11px; vertical-align:top;"><b>LLM needed</b><br><span style="color:#333; font-weight:400;"><b>Algebraic decomposition</b> (rate_full − rate_fixed = v × Y) is symbolic manipulation guided by semantic understanding of the formula.</span></td>
+      <td style="vertical-align:top; padding:6px;"><div style="background:#fdecea; border-left:2px solid #c0392b; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#c0392b;">CORRECTIF.</b> <b>« d'ou sort tu le 0.15 ? »</b> — correction critique sur une hallucination (j'avais sorti une valeur d'exemple sans la marquer comme illustrative)</div><div style="background:#fdecea; border-left:2px solid #c0392b; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#c0392b;">CORRECTIF.</b> « met le meme example avec un taux de -1% »</div></td>
+  </tr>
+
+  <tr>
+    <td class="step phase-analyze">15</td>
+    <td class="phase phase-analyze">4. Analyze</td>
+    <td class="action">Decode the full mechanism: BOR evolution (resorbed by the variable component, created when full − fixed becomes negative), the disabling test (BOR&gt;0 OR ret&lt;0), and where the fee actually impacts units (in <code>units_e</code> via <code>+ int_cred − management_fee</code>, NOT inside investment_income).</td>
+    <td class="output">Truth table linking BOR(t-1), ret(t), effective rate, and BOR(t) effect.</td>
+    <td class="correction"><b>Correction #5.</b> Initial analysis suggested the BOR was created inside the rate formula. Re-reading showed it is created in the BOR update formula via a negative <code>(full − fixed)</code> when returns are negative.</td>
+      <td class="llm-llm" style="background:#fff2cc; color:#b58900; font-size:11px; vertical-align:top;"><b>LLM needed</b><br><span style="color:#333; font-weight:400;"><b>Decoding the BOR mechanism</b> as 'deferred performance-sharing' is interpretation. The truth table is then formalised, but discovering it requires domain insight.</span></td>
+      <td style="vertical-align:top; padding:6px;"><div style="background:#fdecea; border-left:2px solid #c0392b; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#c0392b;">CORRECTIF.</b> <b>« il faut retrouver le management fee full pour l'analyser, je crois que c'est une donnee clef »</b> — l'utilisateur a identifie une lacune dans mon analyse</div></td>
+  </tr>
+
+  <tr>
+    <td class="step phase-analyze">16</td>
+    <td class="phase phase-analyze">4. Analyze</td>
+    <td class="action">Search for monthly/yearly special handling: <code>t == 12</code>, <code>t == 1</code>, <code>pol_year</code>, modulo 12. Result: the fee mechanism itself has no annual logic; <code>fixed_col / 12</code> is the only annual→monthly conversion. A first-year actual-returns branch exists but is out of scope for the standard run.</td>
+    <td class="output">Confirmed: standard run = monthly mechanism with no annual reset.</td>
+    <td class="correction">—</td>
+      <td class="llm-llm" style="background:#fff2cc; color:#b58900; font-size:11px; vertical-align:top;"><b>LLM needed</b><br><span style="color:#333; font-weight:400;"><b>Distinguishing special cases</b> (t==12 calibration vs t<13 actual-returns branch vs pol_year bonus) requires reading the surrounding code to understand intent.</span></td>
+      <td style="vertical-align:top; padding:6px;"><div style="background:#fdecea; border-left:2px solid #c0392b; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#c0392b;">CORRECTIF.</b> <b>« y'a t il un endroit ou il considere le fait que le mois de la projection est 12 ? »</b> — verification d'une subtilite que j'aurais pu manquer</div></td>
+  </tr>
+
+  <!-- PHASE 5 - MODEL -->
+  <tr>
+    <td class="step phase-model">17</td>
+    <td class="phase phase-model">5. Reproduce</td>
+    <td class="action">Build a live Excel model: 3 sheets (Inputs, Model, Notes). 24-month projection with alternating return scenario (good/bad/good/neutral) to show the BOR rising and falling. All cells linked by formulas — change an input, the model recalculates.</td>
+    <td class="output"><b><code>MF_BOR_model.xlsx</code></b> — 340 formulas, 0 errors. Default scenario shows BOR climb from 0 to ~96 over months 7–12 (bad returns), then resorbing to 0 by month 18 (good returns).</td>
+    <td class="correction">—</td>
+      <td class="llm-automatable" style="background:#e2efda; color:#548235; font-size:11px; vertical-align:top;"><b>Automatable</b><br><span style="color:#333; font-weight:400;">Excel model construction. Once formulas are derived (step 14-15), translating them into openpyxl is pure code.</span></td>
+      <td style="vertical-align:top; padding:6px;"><div style="background:#fdecea; border-left:2px solid #c0392b; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#c0392b;">CORRECTIF.</b> <b>« et ou est l'impact sur les investment return ? »</b> — l'utilisateur a force la recherche de la formule units_e qui ferme la boucle</div><div style="background:#fef5e7; border-left:2px solid #cc6600; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#cc6600;">SCOPE.</b> « continuons sur le excel »</div></td>
+  </tr>
+
+  <tr>
+    <td class="step phase-model">18</td>
+    <td class="phase phase-model">5. Reproduce</td>
+    <td class="action">Self-review against the real code, line by line. Identify what the simplified model does NOT include.</td>
+    <td class="output">10 deliberate omissions listed (premiums, claims, surr_charge, pp/pup split, mortality, first-year branch, new-adif branch, non-participating, product exceptions, edge cases on t).</td>
+    <td class="correction"><b>Honesty note.</b> Originally, the omissions were only mentioned in conversation. After the review, they were all written into the Notes sheet of the Excel, so anyone opening the file later knows exactly the scope.</td>
+      <td class="llm-llm" style="background:#fff2cc; color:#b58900; font-size:11px; vertical-align:top;"><b>LLM needed</b><br><span style="color:#333; font-weight:400;"><b>Self-review and identification of omissions</b>. Listing what is missing requires comparing the simplified model to the complete code — a semantic comparison.</span></td>
+      <td style="vertical-align:top; padding:6px;"><div style="background:#fdecea; border-left:2px solid #c0392b; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#c0392b;">CORRECTIF.</b> <b>« est-ce que tu peux te reverifier et voir si tu n'as pas manque d'integrer un composant ? »</b> — demande explicite d'auto-revue (10 omissions identifiees grace a ca)</div></td>
+  </tr>
+
+  <tr>
+    <td class="step phase-model">19</td>
+    <td class="phase phase-model">5. Reproduce — done</td>
+    <td class="action">Final Notes sheet rewritten: scope, inputs, column-by-column read-out, 10 explicit omissions, "good for / not good for" usage guidance, and a note-to-future-self.</td>
+    <td class="output"><b>Final deliverable: <code>MF_BOR_model.xlsx</code>.</b></td>
+    <td class="correction">—</td>
+      <td class="llm-mixed" style="background:#fbe5d6; color:#cc6600; font-size:11px; vertical-align:top;"><b>Mixed</b><br><span style="color:#333; font-weight:400;">Rewriting the Notes sheet is text production. The structure is mine; the principle (write caveats into the deliverable) was a methodology choice in dialogue.</span></td>
+      <td style="vertical-align:top; padding:6px;"><div style="background:#fef5e7; border-left:2px solid #cc6600; padding:3px 6px; margin:2px 0; font-size:10.5px;"><b style="color:#cc6600;">SCOPE.</b> « on garde la version simplifiee »</div></td>
+  </tr>
+
+  </tbody>
+</table>
+
+<!-- ============================== -->
+<!-- WHAT WE PRODUCED -->
+<!-- ============================== -->
+
+<h2>Final deliverables (all in <code>/mnt/user-data/outputs/</code>)</h2>
+
+<table>
+  <thead>
+    <tr><th>File</th><th>Purpose</th><th>Reusable?</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>parse_hierarchie_harel.py</code></td>
+      <td>Parser for RiskAgility audit PDFs (uses pymupdf, handles both layouts).</td>
+      <td>Yes — should work on any RiskAgility audit with minor adjustments.</td>
+    </tr>
+    <tr>
+      <td><code>construire_arbre.py</code></td>
+      <td>Builds the nested tree JSON from the flat parse.</td>
+      <td>Yes — generic.</td>
+    </tr>
+    <tr>
+      <td><code>nettoyer_doublons.py</code></td>
+      <td>Removes false-positive duplicate numbers.</td>
+      <td>Yes — generic.</td>
+    </tr>
+    <tr>
+      <td><code>exporter_excel.py</code></td>
+      <td>Exports the hierarchy as a level-by-column Excel.</td>
+      <td>Yes — generic.</td>
+    </tr>
+    <tr>
+      <td><code>hierarchie_harel.json</code></td>
+      <td>9 177 blocks, full content + metadata.</td>
+      <td>Specific to this PDF.</td>
+    </tr>
+    <tr>
+      <td><code>hierarchie_harel_arbre.json</code></td>
+      <td>Same data, structured as a nested tree.</td>
+      <td>Specific to this PDF.</td>
+    </tr>
+    <tr>
+      <td><code>hierarchie_harel.xlsx</code></td>
+      <td>Visual TOC, one column per hierarchy level.</td>
+      <td>Specific to this PDF.</td>
+    </tr>
+    <tr>
+      <td><code>MF_InvInc_adif_and_fund.xlsx</code></td>
+      <td>44 formulas related to MF and InvInc, in 8 groups.</td>
+      <td>Specific.</td>
+    </tr>
+    <tr>
+      <td><code>MF_mechanism_old_participating.xlsx</code></td>
+      <td>The 4 core formulas of the mechanism.</td>
+      <td>Specific.</td>
+    </tr>
+    <tr>
+      <td><code>MF_mechanism_dependency_graph.html</code></td>
+      <td>Visual graph of how the 12 variables connect.</td>
+      <td>Conceptual — reusable as a template.</td>
+    </tr>
+    <tr>
+      <td><code>MF_full_decomposition.html</code></td>
+      <td>Algebraic derivation + numerical worked example.</td>
+      <td>Conceptual — reusable.</td>
+    </tr>
+    <tr>
+      <td style="background:#f4cccc;"><b><code>MF_BOR_model.xlsx</code></b></td>
+      <td><b>The simplified pedagogical model. Live Excel with formulas, 24-month projection, 3 sheets.</b></td>
+      <td><b>Final deliverable.</b></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ============================== -->
+<!-- LESSONS LEARNED -->
+<!-- ============================== -->
+
+
+<h2>Industrialisation perspective — what could run in batch?</h2>
+
+<div class="summary-box">
+<b>If you wanted to run this workflow on 10 audit reports at once:</b>
+<br><br>
+<b>Steps 1–9 + 17 (the green ones)</b> — pure code. They run unattended.
+You get, for each report: the parsed hierarchy JSON, the level-by-column Excel,
+the empty Excel scaffold. Cost: cheap, fast, reproducible.
+<br><br>
+<b>Steps 10–16, 18 (the yellow ones)</b> — these require either an LLM with domain
+knowledge of life-insurance modelling, or a human actuary. This is where targeting,
+classification, algebraic decomposition, and mechanism interpretation happen.
+Cost: real (either LLM tokens with review, or human time).
+<br><br>
+<b>Steps 4, 5, 9, 19 (the orange ones)</b> — code does the heavy lifting, but a
+moment of inspection or methodology choice is required. Typically: validate one
+sample manually, then trust the batch.
+<br><br>
+<b>Bottom line.</b> Roughly half the workflow industrialises trivially.
+The other half — the value-adding interpretation work — is the part where you
+need either an LLM in the loop or an experienced reviewer. That's the part to budget for.
+</div>
+
+
+<h2>What the user prompts reveal — implications for agent design</h2>
+
+<div class="summary-box">
+<b>This conversation produced 7 critical user prompts that prevented or fixed errors.</b> They split into three types, and each type maps to a specific feature an agent would need.
+<br><br>
+<b>Type 1 — CADRAGE prompts (system prompt material).</b> Examples: "no hallucination", "verify yourself", "go step by step".
+These were stated upfront and applied throughout. An agent must <b>encode them as constraints in its system prompt</b>, not just trust they'll be remembered. They are non-negotiable behavioural rules.
+<br><br>
+<b>Type 2 — SCOPE prompts (conversational steering).</b> Examples: "no need for formula contents, only titles", "Excel in English, no French", "focus on full vs fixed".
+These narrow or expand the work. An agent must <b>actively elicit scope</b> at each major step rather than assume. Better to ask "are you sure you want everything or just the structure?" than to deliver too much or too little.
+<br><br>
+<b>Type 3 — CORRECTIF prompts (error catches).</b> Examples: "where does this 0.15 come from?", "the formulas exist from page 2940", "have you checked you didn't miss a component?".
+These are the most revealing. They show that <b>without the user, several errors would have been delivered as final output</b>:
+<ul style="margin:6px 0 6px 18px;">
+  <li>The 0.15 value was sourced from nowhere (hallucination)</li>
+  <li>Part 5 of the PDF was missed (parser limitation)</li>
+  <li>Several model components were initially omitted (insufficient self-review)</li>
+  <li>The fond 300 hypothesis required clarification (incorrect domain assumption)</li>
+</ul>
+For an agent to be reliable <b>without these user catches</b>, it would need:
+<ul style="margin:6px 0 6px 18px;">
+  <li><b>Source-attribution discipline.</b> Every value cited must reference its origin in the parsed data (formula number, page). Values that cannot be traced are flagged.</li>
+  <li><b>Mandatory self-review steps.</b> After each major output, a separate verification pass that compares the output to the source code.</li>
+  <li><b>Conservative defaults.</b> When the agent isn't sure (e.g. parser found 13 blocks where it should find thousands), it must halt and ask, not push forward.</li>
+  <li><b>Coverage checks.</b> When listing components of a mechanism, an explicit "what might I be missing?" pass.</li>
+</ul>
+<b>Bottom line.</b> The CADRAGE prompts make the agent <i>safe</i>. The SCOPE prompts make the agent <i>useful</i>. The CORRECTIF prompts reveal the <i>gaps in autonomy</i> that the agent's architecture must fill to operate without a human in the loop.
+</div>
+
+<h2>Lessons learned (to apply on the next audit report)</h2>
+
+<div class="summary-box">
+  <ol>
+    <li><b>Use pymupdf, not pdfplumber</b>, for large PDFs (>1 500 pages). Speed and memory.</li>
+    <li><b>Test title detection on both layouts</b> from the start: single-line and two-line. RiskAgility outputs may use either.</li>
+    <li><b>Do not assume the document has 4 parts.</b> Part 5 (Appendix with formulas) exists in some reports but not others. Make the parser tolerant.</li>
+    <li><b>Build a duplicate-cleanup step</b> at the end of parsing — false-positive titles from numeric values in body text will happen.</li>
+    <li><b>Read formulas in their natural order of computation</b> (rates first, then fees, then balance updates) — not in numeric order of section IDs.</li>
+    <li><b>When narrowing down to a mechanism, search by both name AND content keywords</b>, then triage explicitly into "computes vs consumes".</li>
+    <li><b>Algebraic decomposition before numerical example.</b> The example only confirms the algebra, not the other way around.</li>
+    <li><b>Always test the negative-return case</b> for any fee mechanism — it usually exposes the asymmetric / debt-deferring branches.</li>
+    <li><b>Write all caveats into the deliverable itself</b>, not just into the chat. The user will open the file in two months without the conversation context.</li>
+  </ol>
+</div>
+
+</body>
+</html>

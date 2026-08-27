@@ -1,0 +1,16 @@
+=== APPROVED INTERPRETATION FROM STAGE 1 ===
+
+{interpretation}
+
+=== RELEVANT BRANCHES (from Stage 1) ===
+
+{relevant_branches}
+
+=== KEYWORD HINTS (from Stage 1) ===
+
+{keyword_hints}
+
+=== MODEL HIERARCHY (names only — Code Manager + Formulas) ===
+Format: [numero] titre | partie
+
+{hierarchy}
