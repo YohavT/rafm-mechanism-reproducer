@@ -30,6 +30,22 @@ before running:
 
 Paths can be overridden in the sidebar under **Advanced**.
 
+### Generating a new High/Low pair from an Audit Report PDF
+
+If you have a "Willis Towers Watson RiskAgility FM Audit Report" PDF for a new client
+model, `scripts/extract_hierarchy_from_pdf.py` parses it into the same High/Low JSON
+shape:
+
+```bash
+pip install -e ".[pdf]"   # pulls in pymupdf, only needed for this script
+python scripts/extract_hierarchy_from_pdf.py "<path to AuditReport.pdf>" <ClientName>
+```
+
+This writes `docs/Hierarchy_<ClientName>_High.json` and
+`docs/hierarchie_<clientname>_Low.json`, which you then point the sidebar's Advanced
+path fields at. `pymupdf` is not part of the app's normal dependencies — only installed
+when you actually need to extract a new pair.
+
 ## Project structure
 
 ```
