@@ -16,7 +16,7 @@ from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.workbook.defined_name import DefinedName
 
 from ..artifacts import save_json
@@ -181,13 +181,13 @@ def _build_model_sheet(ws, spec: Stage5Output):
     # Header row
     _hdr(ws, HEADER_ROW, 1, "Period")
     for calc, col_letter in zip(calcs, col_map.values()):
-        hdr_cell = _hdr(ws, HEADER_ROW, ord(col_letter) - ord("A") + 1, calc.label)
+        hdr_cell = _hdr(ws, HEADER_ROW, column_index_from_string(col_letter), calc.label)
         hdr_cell.alignment = Alignment(wrap_text=True, horizontal="center")
 
     # Init row (row 2) — zeros for calculated columns
     ws.cell(row=INIT_ROW, column=1, value=0).font = Font(color="AAAAAA")
     for col_letter in col_map.values():
-        c = ws.cell(row=INIT_ROW, column=ord(col_letter) - ord("A") + 1, value=0)
+        c = ws.cell(row=INIT_ROW, column=column_index_from_string(col_letter), value=0)
         c.font = Font(color="AAAAAA")
 
     # Data rows (t=1 to n)
@@ -199,7 +199,7 @@ def _build_model_sheet(ws, spec: Stage5Output):
 
         for calc in calcs:
             col_letter = col_map[calc.column_name]
-            col_idx = ord(col_letter) - ord("A") + 1
+            col_idx = column_index_from_string(col_letter)
 
             if calc.kind == "conditional" and calc.condition_excel:
                 condition = _resolve_formula(
